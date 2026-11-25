@@ -1,0 +1,5 @@
+/Users/emilmendow/Desktop/praxis1/build/CMakeFiles/webserver.dir
+/Users/emilmendow/Desktop/praxis1/build/CMakeFiles/package.dir
+/Users/emilmendow/Desktop/praxis1/build/CMakeFiles/package_source.dir
+/Users/emilmendow/Desktop/praxis1/build/CMakeFiles/edit_cache.dir
+/Users/emilmendow/Desktop/praxis1/build/CMakeFiles/rebuild_cache.dir
