@@ -5,6 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <stdlib.h>
+
 #define MYPORT "3490"
 #define BACKLOG 10
 #define BUFFER_CAPACITY 16000
@@ -14,6 +16,7 @@
 
 // function declarations:
 void handle_http_request(char buffer[]);
+void handle_socket_transaction(int new_fd, char output[], int output_valid_bytes);
 void clear_one_request_buffer(char buffer[], char* request_end_ptr, int* output_valid_bytes);
 
 int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm, [1] is first argument
@@ -34,19 +37,41 @@ int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm
 
     // -- set up hint for getaddrinf()
     memset(&hints, 0, sizeof(hints)); //set all to zeros
-    hints.ai_family = AF_UNSPEC; //automatic IPv4 /IPv6
+    hints.ai_family = AF_INET; //automatic IPv4 /IPv6 //gerdae nur IPv4
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    getaddrinfo(port_in[1], port_in[2], &hints, &res); //writes into res
+    if(getaddrinfo(port_in[1], port_in[2], &hints, &res) != 0) {
+        perror("addrInfo");
+        exit(1);
+    } 
 
-    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol); // get socket file descriptor
+    if((sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+        perror("socket");
+        exit(1);
+    }
 
     int yes = 1;
-    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
+        perror("setsockopt");
+        exit(1);
+    }
     
-    bind(sockfd, res->ai_addr, res->ai_addrlen); // bind to specific computer port
-    listen(sockfd, BACKLOG);
+    if(bind(sockfd, res->ai_addr, res->ai_addrlen) == -1) {
+        perror("bind");
+        exit(1);
+    }
+
+    if(listen(sockfd, BACKLOG) == -1) {
+        perror("listen");
+        exit(1);
+    }
+
+    fprintf(stderr, "Server listening on %s:%s\n",
+        port_in[1], port_in[2]);
+    fflush(stderr);
+
+
 
     addr_size = sizeof storage;
 
@@ -54,41 +79,19 @@ int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm
     char output[BUFFER_CAPACITY];
     memset(output, 0, sizeof(output)); // setzt \0 überall
 
+
     while(1) {
-        new_fd = accept(sockfd, (struct sockaddr *)&storage, &addr_size);
-
-        while(1) {
-            int bytes_send = recv(new_fd, output + output_valid_bytes * sizeof(char), sizeof(output), 0); //can have multiple receives if == 0 geschlossen, < 0 Fehler, > 0 wurden Bytes empfangen
-            printf("one received\n");
-            if(bytes_send < 0) {
-                printf("ERROR:PACKET_RECEIVE_PROBLEM\n");
-                break;
-            } else if (bytes_send == 0) {
-                memset(output,0,sizeof(output));
-                printf("end of transmission reached\n");
-                break;
-            }
-            output_valid_bytes = output_valid_bytes + bytes_send;
-            if(bytes_send > 0) {
-                output[output_valid_bytes] = '\0';
-            }
-
-            while(1) { //check for complete http requests
-                char* request_end = strstr(output, "\r\n\r\n");
-                if(request_end != NULL) { // one message send completly
-                    handle_http_request(output);
-                    send(new_fd,"Reply\r\n\r\n",9,0);
-                    clear_one_request_buffer(output, request_end, &output_valid_bytes);
-                } else {
-                    break;
-                }
-            } 
+        if((new_fd = accept(sockfd, (struct sockaddr *)&storage, &addr_size)) == -1) {
+            perror("accept");
+            exit(1);
         }
 
-
+        handle_socket_transaction(new_fd, output, output_valid_bytes);
+        
         close(new_fd);
-
     }
+
+    
 
 }
 
@@ -106,6 +109,46 @@ void handle_http_request(char buffer[]) {
     printf("------\n");
 }
 
+void handle_socket_transaction(int new_fd, char output[], int output_valid_bytes) {
+    printf("TESTEST\n");
+    while(1) {
+        int bytes_send = recv(new_fd, output + output_valid_bytes * sizeof(char), BUFFER_CAPACITY - output_valid_bytes - 1, 0); 
+        if(bytes_send < 0) {
+            perror("recv");
+            exit(1);
+            return;
+        } else if (bytes_send == 0) {
+            memset(output,0, BUFFER_CAPACITY);
+            printf("end of transmission reached\n");
+            return;
+        }
+
+        printf("%i\n",bytes_send);
+
+        output_valid_bytes = output_valid_bytes + bytes_send;
+        output[output_valid_bytes] = '\0';
+
+
+        while(1) { //check for complete http requests
+            char* request_end = strstr(output, "\r\n\r\n");
+            if(request_end != NULL) { // one message send completly
+                handle_http_request(output);
+                const char response[] =
+                "HTTP/1.1 400 Bad Request\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+                if(send(new_fd, response, sizeof(response) - 1, 0) == -1) {
+                    perror("send");
+                    exit(1);
+                }
+                clear_one_request_buffer(output, request_end, &output_valid_bytes);
+            } else {
+                break;
+            }
+        } 
+    }
+}
 
 
 void clear_one_request_buffer(char buffer[], char* request_end_ptr, int* output_valid_bytes) {
@@ -121,7 +164,6 @@ void clear_one_request_buffer(char buffer[], char* request_end_ptr, int* output_
         buffer[i] = '\0';
         i++;
     }
-
 }
 
 
