@@ -56,29 +56,39 @@ int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm
 
     while(1) {
         new_fd = accept(sockfd, (struct sockaddr *)&storage, &addr_size);
-        int bytes_send = recv(new_fd, output + output_valid_bytes * sizeof(char), sizeof(output), 0);
-        output_valid_bytes = output_valid_bytes + bytes_send;
-        if(bytes_send > 0) {
-            output[output_valid_bytes] = '\0';
-        }
 
-        printf("%s",output);
-
-        while(1) { //check for complete http requests
-            char* request_end = strstr(output, "\r\n\r\n");
-            if(request_end != NULL) { // one message send completly
-                handle_http_request(output);
-                send(new_fd,"Reply\r\n\r\n",9,0);
-                clear_one_request_buffer(output, request_end, &output_valid_bytes);
-            } else {
+        while(1) {
+            int bytes_send = recv(new_fd, output + output_valid_bytes * sizeof(char), sizeof(output), 0); //can have multiple receives if == 0 geschlossen, < 0 Fehler, > 0 wurden Bytes empfangen
+            printf("one received\n");
+            if(bytes_send < 0) {
+                printf("ERROR:PACKET_RECEIVE_PROBLEM\n");
+                break;
+            } else if (bytes_send == 0) {
+                memset(output,0,sizeof(output));
+                printf("end of transmission reached\n");
                 break;
             }
-        } 
+            output_valid_bytes = output_valid_bytes + bytes_send;
+            if(bytes_send > 0) {
+                output[output_valid_bytes] = '\0';
+            }
+
+            while(1) { //check for complete http requests
+                char* request_end = strstr(output, "\r\n\r\n");
+                if(request_end != NULL) { // one message send completly
+                    handle_http_request(output);
+                    send(new_fd,"Reply\r\n\r\n",9,0);
+                    clear_one_request_buffer(output, request_end, &output_valid_bytes);
+                } else {
+                    break;
+                }
+            } 
+        }
+
 
         close(new_fd);
 
     }
-
 
 }
 
@@ -113,4 +123,6 @@ void clear_one_request_buffer(char buffer[], char* request_end_ptr, int* output_
     }
 
 }
+
+
 
