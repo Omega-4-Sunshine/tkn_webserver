@@ -36,10 +36,12 @@ struct RequestInfo {
 
 
 // function declarations:
-void handle_http_request(char buffer[]);
+void display_info(RequestInfo info);
+void handle_http_request(char buffer[], int new_fd);
 void handle_socket_transaction(int new_fd, char output[], int output_valid_bytes);
 void clear_one_request_buffer(char buffer[], char* request_end_ptr, int* output_valid_bytes);
 RequestInfo find_Request_Info(char buffer[]);
+
 
 
 int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm, [1] is first argument
@@ -120,12 +122,15 @@ int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm
 RequestInfo find_Request_Info(char buffer[]) {
     RequestInfo info;
 
+    info.content_length = -1;
+
     char method[16];
     char path[1024];
     char version[16];
 
 
     if(sscanf(buffer, "%15s %1023s %15s", method, path, version) != 3) { //returns number of arguments read
+        printf("2\n");
         info.requestType = INCORRECT;
     }
 
@@ -146,6 +151,8 @@ RequestInfo find_Request_Info(char buffer[]) {
         info.requestType = POST;
     } else {
         info.requestType = INCORRECT;
+        printf("3\n");
+        return info;
     }
 
     strcpy(info.path,path);
@@ -159,57 +166,89 @@ RequestInfo find_Request_Info(char buffer[]) {
 
     while(1) {
         char key[1024];
+        memset(key,0,1023);
         char value[1024];
+        memset(value,0,1023);
 
         int read = sscanf(curent_pos, "%1023s %1023s",key, value);
         if(read == 1 || read > 2) {
             info.requestType = INCORRECT;
+            printf("%s",key);
+            printf("4\n");
             return info;
         } else if (read == 0) {
             break;
+        } else if (read == EOF) {
+            break;
         }
 
-        curent_pos = curent_pos + (strlen(key) + strlen(value) + 1);
+        curent_pos = curent_pos + (strlen(key) + strlen(value) + 3); //Leerzeichen + \r\n
 
-        strcpy(info.path, value);
-        //break;
+
+        if(key[strlen(key) - 1] != ':') {
+            printf("TESTEST: %s \n",key);
+            info.requestType = INCORRECT;
+            return info;
+        }
+
+        if(strcmp(key,"Content-Length:") == 0) {
+            int i;
+            sscanf(value, "%i", &i);
+            info.content_length = i;
+        }
+
     }
     
-
     return info;
 
 }
 
-void handle_http_request(char buffer[]) {
+void display_info(RequestInfo info) {
+    printf("-------\n");
+    printf("Content Length: %i\n",info.content_length);
+    printf("Request Type: %i\n", info.requestType);
+    printf("-------\n");
+}
 
-    // Startzeile
-    /*
-    char method[16];
-    char path[1024];
-    char version[16];
+void handle_http_request(char buffer[], int new_fd) {
 
-    sscanf(buffer, "%15s %1023s %15s", method, path, version);
-
-    if(strcmp(method, "GET") == 0) {
-        printf("found GET\n");
-    }
-
-    printf("------\n");
-    printf("%s\n", method);
-    printf("%s\n", path);
-    printf("%s\n", version); 
-    printf("------\n");
-    */
-    // Headers
     RequestInfo info = find_Request_Info(buffer);
+
+    display_info(info);
 
     //check if INCORRECT, bc. all other values then undefined 
 
-    if(info.requestType == GET) {
-        printf("succesfull GET\n");
+    
+    char response[1024];
+    memset(response, 0, 1024);
+
+    switch(info.requestType) {
+        case INCORRECT:
+            strcpy(response, "HTTP/1.1 400 Bad Request\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n");  
+        break;
+        case GET:
+            printf("GET SUCCESFULL\n");
+            strcpy(response, "HTTP/1.1 404 Not Found\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n");        
+        break;
+        default:
+            strcpy(response, "HTTP/1.1 501 Not Implemented\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n");   
+        break;
     }
 
-    printf("%s\n",info.path);
+    if(send(new_fd, response, sizeof(response) - 1, 0) == -1) {
+        perror("send");
+        exit(1);
+    }
+
 }
 
 
@@ -227,25 +266,21 @@ void handle_socket_transaction(int new_fd, char output[], int output_valid_bytes
             return;
         }
 
-        printf("%i\n",bytes_send);
-
         output_valid_bytes = output_valid_bytes + bytes_send;
         output[output_valid_bytes] = '\0';
 
 
         while(1) { //check for complete http requests
             char* request_end = strstr(output, "\r\n\r\n");
+
+            char sanitized[BUFFER_CAPACITY];
+            strcpy(sanitized,output);
+            *(strstr(sanitized, "\r\n\r\n") + 4) = '\0';
+            
+
             if(request_end != NULL) { // one message send completly
-                handle_http_request(output);
-                const char response[] =
-                "HTTP/1.1 400 Bad Request\r\n"
-                "Content-Length: 0\r\n"
-                "Connection: close\r\n"
-                "\r\n";
-                if(send(new_fd, response, sizeof(response) - 1, 0) == -1) {
-                    perror("send");
-                    exit(1);
-                }
+                handle_http_request(sanitized, new_fd);
+
                 clear_one_request_buffer(output, request_end, &output_valid_bytes);
             } else {
                 break;
