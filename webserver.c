@@ -16,6 +16,8 @@
 
 //printf 'GET /index.html HTTP/1.1\r\nHost: localhost:1234\r\nConnection: close\r\n\r\n GET /index.html HTTP/1.1\r\nHost: localhost:1234\r\nConnection: close\r\n\r\n' | nc 127.0.0.1 1234
 
+//git push -u origin main
+
 
 enum RequestType {
     GET,
@@ -122,15 +124,17 @@ RequestInfo find_Request_Info(char buffer[]) {
     char path[1024];
     char version[16];
 
-    int start_length = sscanf(buffer, "%15s %1023s %15s", method, path, version); //returns number of arguments read
-    
-    char* headers_start = buffer + start_length + 1;
+
+    if(sscanf(buffer, "%15s %1023s %15s", method, path, version) != 3) { //returns number of arguments read
+        info.requestType = INCORRECT;
+    }
+
+    int start_length = strlen(method) + strlen(path) + strlen(version); //does not include \r\n jeweils ()
+    start_length = start_length + strlen("\r\n\r\n");
 
     if(strlen(method) == 0 || strlen(path) == 0 || strlen(version) == 0) {
         info.requestType = INCORRECT;
     }
-
-    info.content_length = 0;
 
     if(strcmp(method, "GET") == 0) {
         info.requestType = GET;
@@ -147,9 +151,30 @@ RequestInfo find_Request_Info(char buffer[]) {
     strcpy(info.path,path);
     strcpy(info.version,version);
 
+    strcpy(info.path, buffer + start_length);
+
     //look at headers <key>: <value>
 
+    char* curent_pos = buffer + start_length;
 
+    while(1) {
+        char key[1024];
+        char value[1024];
+
+        int read = sscanf(curent_pos, "%1023s %1023s",key, value);
+        if(read == 1 || read > 2) {
+            info.requestType = INCORRECT;
+            return info;
+        } else if (read == 0) {
+            break;
+        }
+
+        curent_pos = curent_pos + (strlen(key) + strlen(value) + 1);
+
+        strcpy(info.path, value);
+        //break;
+    }
+    
 
     return info;
 
@@ -177,13 +202,19 @@ void handle_http_request(char buffer[]) {
     */
     // Headers
     RequestInfo info = find_Request_Info(buffer);
+
+    //check if INCORRECT, bc. all other values then undefined 
+
+    if(info.requestType == GET) {
+        printf("succesfull GET\n");
+    }
+
     printf("%s\n",info.path);
 }
 
 
 
 void handle_socket_transaction(int new_fd, char output[], int output_valid_bytes) {
-    printf("TESTEST\n");
     while(1) {
         int bytes_send = recv(new_fd, output + output_valid_bytes * sizeof(char), BUFFER_CAPACITY - output_valid_bytes - 1, 0); 
         if(bytes_send < 0) {
