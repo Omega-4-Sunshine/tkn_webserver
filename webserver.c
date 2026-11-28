@@ -14,10 +14,31 @@
 // https://en.wikipedia.org/wiki/C_data_types
 // COMPILE + RUN: make -C build && ./build/webserver 
 
+//printf 'GET /index.html HTTP/1.1\r\nHost: localhost:1234\r\nConnection: close\r\n\r\n GET /index.html HTTP/1.1\r\nHost: localhost:1234\r\nConnection: close\r\n\r\n' | nc 127.0.0.1 1234
+
+
+enum RequestType {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+    INCORRECT
+} typedef RequestType;
+
+struct RequestInfo {
+    RequestType requestType;
+    char path[1024];
+    char version[16];
+    int content_length;
+} typedef RequestInfo;
+
+
 // function declarations:
 void handle_http_request(char buffer[]);
 void handle_socket_transaction(int new_fd, char output[], int output_valid_bytes);
 void clear_one_request_buffer(char buffer[], char* request_end_ptr, int* output_valid_bytes);
+RequestInfo find_Request_Info(char buffer[]);
+
 
 int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm, [1] is first argument
 
@@ -25,7 +46,6 @@ int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm
         printf("number of input arguments incorrect");
         return -1;
     }
-
 
 
     struct sockaddr_storage storage;
@@ -95,19 +115,72 @@ int main(int argc, char* port_in[]) { //arr at [0] is name / Aufrufpfad Programm
 
 }
 
+RequestInfo find_Request_Info(char buffer[]) {
+    RequestInfo info;
+
+    char method[16];
+    char path[1024];
+    char version[16];
+
+    int start_length = sscanf(buffer, "%15s %1023s %15s", method, path, version); //returns number of arguments read
+    
+    char* headers_start = buffer + start_length + 1;
+
+    if(strlen(method) == 0 || strlen(path) == 0 || strlen(version) == 0) {
+        info.requestType = INCORRECT;
+    }
+
+    info.content_length = 0;
+
+    if(strcmp(method, "GET") == 0) {
+        info.requestType = GET;
+    } else if(strcmp(method, "PUT") == 0) {
+        info.requestType = PUT;
+    } else if(strcmp(method, "DELETE") == 0) {
+        info.requestType = DELETE;
+    } else if(strcmp(method, "POST") == 0) {
+        info.requestType = POST;
+    } else {
+        info.requestType = INCORRECT;
+    }
+
+    strcpy(info.path,path);
+    strcpy(info.version,version);
+
+    //look at headers <key>: <value>
+
+
+
+    return info;
+
+}
+
 void handle_http_request(char buffer[]) {
+
+    // Startzeile
+    /*
     char method[16];
     char path[1024];
     char version[16];
 
     sscanf(buffer, "%15s %1023s %15s", method, path, version);
 
+    if(strcmp(method, "GET") == 0) {
+        printf("found GET\n");
+    }
+
     printf("------\n");
     printf("%s\n", method);
     printf("%s\n", path);
     printf("%s\n", version); 
     printf("------\n");
+    */
+    // Headers
+    RequestInfo info = find_Request_Info(buffer);
+    printf("%s\n",info.path);
 }
+
+
 
 void handle_socket_transaction(int new_fd, char output[], int output_valid_bytes) {
     printf("TESTEST\n");
